@@ -1,12 +1,13 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
+	// "bytes"
+	// "encoding/binary"
 	"fmt"
 	"os"
 	"os/signal"
-	"unsafe"
+	"time"
+	// "unsafe"
 
 	"github.com/iovisor/gobpf/elf"
 	"github.com/iovisor/gobpf/pkg/bpffs"
@@ -21,15 +22,17 @@ type readEvent struct {
 }
 
 func handleEvent(data *[]byte) {
-	var event readEvent
-	err := binary.Read(bytes.NewBuffer(*data), binary.LittleEndian, &event)
-	if err != nil {
-		fmt.Printf("failed to decode received data: %v\n", err)
-		return
-	}
-	syscall := (*C.char)(unsafe.Pointer(&event.Syscall))
-	fmt.Printf("syscall %s pid %d fd %d\n",
-		C.GoString(syscall), event.Pid, event.Fd)
+	fmt.Print(".")
+	return
+	// var event readEvent
+	// err := binary.Read(bytes.NewBuffer(*data), binary.LittleEndian, &event)
+	// if err != nil {
+	// 	fmt.Printf("failed to decode received data: %v\n", err)
+	// 	return
+	// }
+	// syscall := (*C.char)(unsafe.Pointer(&event.Syscall))
+	// fmt.Printf("syscall %s pid %d fd %d\n",
+	// 	C.GoString(syscall), event.Pid, event.Fd)
 }
 
 func main() {
@@ -43,7 +46,7 @@ func main() {
 	globalModule := elf.NewModule("./program.o")
 	err = globalModule.Load(nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load and pin map: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Failed to load globalModule: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() {
@@ -64,7 +67,7 @@ func main() {
 	progModule := elf.NewModule("./program.o")
 	err = progModule.Load(elfSectionParams)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load program: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Failed to load progModule: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() {
@@ -76,7 +79,7 @@ func main() {
 
 	err = progModule.EnableKprobes(0)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to enable kprobe: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Failed to enable kprobes: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -92,12 +95,33 @@ func main() {
 		for {
 			select {
 			case <-stopChan:
-				fmt.Println("stopping goroutine")
+				fmt.Println("Stopping handler goroutine")
 				return
 			case data := <-channel:
 				handleEvent(&data)
 			}
 		}
+	}()
+
+	go func() {
+		time.Sleep(5 * time.Second)
+
+		fmt.Println("Closing progModule")
+		progModule.Close()
+
+		fmt.Println("Initializing progModule again ...")
+		progModule = elf.NewModule("./program.o")
+		err = progModule.Load(elfSectionParams)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to load progModule: %v\n", err)
+			os.Exit(1)
+		}
+		err = progModule.EnableKprobes(0)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to enable kprobes: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Initialized progModule")
 	}()
 
 	sig := make(chan os.Signal, 1)
